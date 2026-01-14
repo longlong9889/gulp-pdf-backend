@@ -12,6 +12,78 @@ function splitIntoSentences(text) {
   return sentences;
 }
 
+/**
+ * Check if sentence involves 2+ people (social interaction)
+ * Returns true if it references another person (you, your, we, us, etc.)
+ */
+function involvesTwoPeople(text) {
+  const lowerText = text.toLowerCase();
+  
+  // Second person pronouns - indicates talking TO or ABOUT another person
+  const secondPersonPatterns = [
+    /\byou\b/i,
+    /\byour\b/i,
+    /\byours\b/i,
+    /\byourself\b/i,
+  ];
+  
+  // First person plural - indicates "us together"
+  const firstPersonPluralPatterns = [
+    /\bwe\b/i,
+    /\bus\b/i,
+    /\bour\b/i,
+    /\bours\b/i,
+    /\bourselves\b/i,
+    /\blet'?s\b/i,
+    /\blets\b/i,
+  ];
+  
+  // Check for second person
+  for (const pattern of secondPersonPatterns) {
+    if (pattern.test(lowerText)) {
+      return true;
+    }
+  }
+  
+  // Check for first person plural
+  for (const pattern of firstPersonPluralPatterns) {
+    if (pattern.test(lowerText)) {
+      return true;
+    }
+  }
+  
+  // Names/titles that imply calling someone
+  const callingPatterns = [
+    /\bmommy\b/i, /\bmom\b/i, /\bmama\b/i,
+    /\bdaddy\b/i, /\bdad\b/i, /\bdada\b/i, /\bpapa\b/i,
+    /\bteacher\b/i, /\bfriend\b/i,
+  ];
+  
+  // Only count as 2-person if it's calling out (starts with name or has "!")
+  for (const pattern of callingPatterns) {
+    if (pattern.test(lowerText) && (lowerText.includes('!') || lowerText.match(/^(mommy|mom|mama|daddy|dad|dada|papa|teacher|friend)\b/i))) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * Check if sentence is ego-centric (only about oneself)
+ */
+function isEgoCentric(text) {
+  const lowerText = text.toLowerCase();
+  
+  // Has first person
+  const hasFirstPerson = /\bi\b|\bi'?m\b|\bim\b|\bmy\b|\bme\b|\bmyself\b|\bmine\b/i.test(lowerText);
+  
+  // Does NOT have second person or plural
+  const hasTwoPeople = involvesTwoPeople(lowerText);
+  
+  return hasFirstPerson && !hasTwoPeople;
+}
+
 function extractPartsOfSpeech(sentence) {
   const doc = nlp(sentence);
   
@@ -57,14 +129,27 @@ function categorizeFromAnalysis(analysisRow) {
   const hasVerb = (keywords) => verbList.some(v => keywords.some(k => v.includes(k)));
   const hasInterjection = (keywords) => interjectionList.some(i => keywords.some(k => i.includes(k)));
 
-  // PROTEST
+  // ============================================
+  // PROTEST (Red) - Check first
+  // Rejecting, refusing, stopping, expressing discomfort
+  // ============================================
+  
   const protestPatterns = [
-    /^no\b/i, /^nope\b/i, /^stop\b/i, /^don'?t\b/i,
+    /^no\b/i, /^nope\b/i, /^stop\b/i, 
     /^i don'?t want/i, /^i don'?t like/i, /^i don'?t need/i,
     /^i hate/i, /^go away/i, /^leave me/i, /^get out/i, /^get away/i,
     /^i refuse/i, /^never\b/i, /^not now/i, /^no more/i, /^no way/i,
     /^i can'?t\b/i, /^i won'?t\b/i, /\ball done\b/i, /\bi'?m done\b/i,
     /\bstop that\b/i, /\bstop it\b/i,
+    // NEW: "Not..." phrases (rejecting)
+    /^not that\b/i, /^not like that/i, /^not this/i,
+    // NEW: Discomfort phrases
+    /\bhurts\b/i, /\btoo loud\b/i, /\btoo big\b/i, /\btoo hot\b/i, /\btoo cold\b/i,
+    /\bi'?m uncomfortable/i, /\bsomething'?s wrong/i, /\bsomethings wrong/i,
+    // NEW: Finished/done expressing stopping
+    /\bi'?m finished\b/i, /\bim finished\b/i,
+    // NEW: Need space (protest/boundary)
+    /\bi need space\b/i,
   ];
   
   for (const pattern of protestPatterns) {
@@ -73,20 +158,86 @@ function categorizeFromAnalysis(analysisRow) {
     }
   }
   
+  // Check for protest verbs, but NOT "don't stop" (that's a request to continue)
   const protestVerbs = ["don't", "dont", "stop", "won't", "wont", "can't", "cant", "refuse", "hate"];
   if (hasVerb(protestVerbs) && text.startsWith('i ')) {
-    return { category: 'protest', confidence: 'high', reason: 'Protest verb with first-person' };
+    // Exception: "don't stop" is a REQUEST, not protest
+    if (!/don'?t stop/i.test(text)) {
+      return { category: 'protest', confidence: 'high', reason: 'Protest verb with first-person' };
+    }
   }
 
-  // SOCIAL
+  // ============================================
+  // REQUEST (Blue) - Check second
+  // Trying to get something, get help, get more, get an action, or get attention
+  // ============================================
+  
+  const requestPatterns = [
+    /^i want/i, /^i need/i, /^i would like/i, /^i'?d like/i,
+    /^can i (have|get|go|play|see|use|try)/i, /^can you (help|give|get|show|tell|pass|open)/i,
+    /^could you/i, /^would you/i, /^will you/i, /^may i/i, /^let me/i,
+    /^give me/i, /^get me/i, /^help me/i, /^show me/i, /^tell me/i, /^pass me/i,
+    /^i wanna/i, /^i gotta/i, /^more\b/i, /^more please/i, /^another\b/i,
+    /^again\b/i, /^do it again/i, /^one more/i, /^please (help|give|get|show|tell|pass|open|can)/i,
+    // NEW: "Let's..." phrases (requesting action together)
+    /^let'?s\b/i, /^lets\b/i,
+    // NEW: "Keep..." phrases (requesting continuation)
+    /^keep going/i, /^keep it coming/i, /^keep \w+ing/i,
+    // NEW: "Don't stop" is a request to continue
+    /^don'?t stop/i, /^dont stop/i,
+    // NEW: Attention-getting imperatives
+    /^look at me/i, /^watch this/i, /^watch me/i, /^look here/i,
+    /^listen\b/i, /^pay attention/i, /^come see/i,
+    // NEW: Action requests
+    /^do this/i, /^try this/i,
+    // NEW: Not finished yet (requesting to continue)
+    /^not finished/i,
+  ];
+  
+  for (const pattern of requestPatterns) {
+    if (pattern.test(text)) {
+      return { category: 'request', confidence: 'high', reason: 'Matched request pattern' };
+    }
+  }
+  
+  // Check verbs for request signals
+  const requestVerbs = ['want', 'need', 'give', 'help', 'get', 'show', 'pass'];
+  if (hasVerb(requestVerbs)) {
+    if (/\bi\b/i.test(text) && hasVerb(['want', 'need', 'wanna', 'gotta'])) {
+      return { category: 'request', confidence: 'medium', reason: 'Request verb with first-person' };
+    }
+    if (/^(give|help|get|show|pass|let)\b/i.test(text)) {
+      return { category: 'request', confidence: 'high', reason: 'Imperative request verb' };
+    }
+  }
+  
+  // NEW: Name + help me pattern (e.g., "Daddy! Help me")
+  if (/help me/i.test(text)) {
+    return { category: 'request', confidence: 'high', reason: 'Contains help me' };
+  }
+
+  // ============================================
+  // SOCIAL (Yellow) - Check third
+  // Social initiation, maintenance, greetings, affection, politeness, sharing
+  // ============================================
+  
   const socialPatterns = [
     /^hi\b/i, /^hey\b/i, /^hello\b/i, /^good (morning|afternoon|evening|night)/i,
     /^bye\b/i, /^goodbye\b/i, /^good bye\b/i, /^see you/i, /^see ya/i,
     /^thank you/i, /^thanks\b/i, /^please\b$/i, /^sorry\b/i, /^excuse me/i,
     /^pardon/i, /^welcome\b/i, /^nice to meet/i, /^how are you/i, /^what'?s up/i,
-    /^look at this/i, /^look at that/i, /^check this/i, /^come here/i, /^over here/i,
-    /^guess what/i, /^you know what/i, /^that'?s (funny|cool|awesome|great|nice|silly)/i,
+    /^come here/i, /^over here/i,
+    /^guess what/i, /^you know what/i, 
+    /^that'?s (funny|cool|awesome|great|nice|silly)/i, /^thats (funny|cool|awesome|great|nice|silly)/i,
     /^wow\b/i, /^oh boy/i, /^yay\b/i,
+    // NEW: Affection phrases
+    /^i love you/i, /\bi love you\b/i,
+    /^you'?re my favorite/i, /^youre my favorite/i,
+    /^i like being with you/i, /^you matter to me/i,
+    // NEW: Turn-taking (social interaction)
+    /^your turn/i, /^my turn/i,
+    // NEW: Playful/social phrases
+    /^just kidding/i, /^want some/i,
   ];
   
   for (const pattern of socialPatterns) {
@@ -101,39 +252,47 @@ function categorizeFromAnalysis(analysisRow) {
     return { category: 'social', confidence: 'high', reason: 'Starts with social interjection' };
   }
 
-  // REQUEST
-  const requestPatterns = [
-    /^i want/i, /^i need/i, /^i would like/i, /^i'?d like/i,
-    /^can i (have|get|go|play|see|use|try)/i, /^can you (help|give|get|show|tell|pass|open)/i,
-    /^could you/i, /^would you/i, /^will you/i, /^may i/i, /^let me/i,
-    /^give me/i, /^get me/i, /^help me/i, /^show me/i, /^tell me/i, /^pass me/i,
-    /^i wanna/i, /^i gotta/i, /^more\b/i, /^more please/i, /^another\b/i,
-    /^again\b/i, /^do it again/i, /^one more/i, /^please (help|give|get|show|tell|pass|open|can)/i,
-  ];
+  // ============================================
+  // 2-PERSON CHECK
+  // If sentence involves "you", "your", "we", "us" → SOCIAL
+  // Social requires interaction with another person
+  // ============================================
   
-  for (const pattern of requestPatterns) {
-    if (pattern.test(text)) {
-      return { category: 'request', confidence: 'high', reason: 'Matched request pattern' };
+  if (involvesTwoPeople(text)) {
+    // Affection & connection phrases with 2 people
+    const affectionPatterns = [
+      /\bi love you\b/i, /\bi like you\b/i, /\bi miss you\b/i,
+      /\byou'?re my favorite/i, /\byoure my favorite/i,
+      /\bi like being with you/i, /\byou matter to me/i,
+      /\bwant some\b/i, // offering to someone
+    ];
+    
+    for (const pattern of affectionPatterns) {
+      if (pattern.test(text)) {
+        return { category: 'social', confidence: 'high', reason: 'Affection/connection with another person' };
+      }
     }
-  }
-  
-  const requestVerbs = ['want', 'need', 'give', 'help', 'get', 'show', 'pass'];
-  if (hasVerb(requestVerbs)) {
-    if (/\bi\b/i.test(text) && hasVerb(['want', 'need', 'wanna', 'gotta'])) {
-      return { category: 'request', confidence: 'medium', reason: 'Request verb with first-person' };
-    }
-    if (/^(give|help|get|show|pass|let)\b/i.test(text)) {
-      return { category: 'request', confidence: 'high', reason: 'Imperative request verb' };
-    }
+    
+    // Generic 2-person sentences that aren't requests or protests
+    // are likely social interactions
+    return { category: 'social', confidence: 'medium', reason: 'Involves 2+ people (you/we/us)' };
   }
 
-  // SHARING INFO
+  // ============================================
+  // SHARING INFO (Orange) - Default category
+  // Sharing thoughts, describing, labeling, noticing, asking, answering
+  // EGO-CENTRIC (only about oneself)
+  // ============================================
+  
   const sharingPatterns = [
-    /^i (like|love|enjoy|think|know|see|have|am|was|got|made|played|went|did|saw)/i,
-    /^i'?m\b/i, /^it'?s\b/i, /^that'?s\b/i, /^this is/i,
+    /^i (like|enjoy|think|know|see|have|am|was|got|made|played|went|did|saw)/i,
+    /^i'?m\b/i, /^im\b/i, /^it'?s\b/i, /^its\b/i, /^that'?s\b/i, /^thats\b/i, /^this is/i,
     /^there (is|are|was|were)/i, /^my (name|favorite|mom|dad|friend|dog|cat|brother|sister)/i,
     /^the \w+ (is|are|was|were)/i, /^(he|she|they|we) (is|are|was|were|has|have|had|did|went|got)/i,
     /^yes\b/i, /^yeah\b/i, /^yep\b/i, /^okay\b/i, /^ok\b/i,
+    // Questions (asking for info, not requesting action)
+    /^what'?s that/i, /^whats that/i, /^where did/i, /^who'?s that/i, /^whos that/i,
+    /^why\b/i, /^what happened/i, /^where'?s my/i, /^wheres my/i,
   ];
   
   for (const pattern of sharingPatterns) {
@@ -144,6 +303,11 @@ function categorizeFromAnalysis(analysisRow) {
   
   if (hasInterjection(['yeah', 'yep', 'yup', 'yes']) && text.split(/\s+/).length > 1) {
     return { category: 'sharing_info', confidence: 'high', reason: 'Affirmative with content' };
+  }
+  
+  // Ego-centric check: if it's about "I/me/my" with no second person → sharing info
+  if (isEgoCentric(text)) {
+    return { category: 'sharing_info', confidence: 'medium', reason: 'Ego-centric (about oneself)' };
   }
   
   if (nounList.length > 0 && verbList.length > 0) {
