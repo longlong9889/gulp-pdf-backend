@@ -1,0 +1,9 @@
+{
+  "name": "gulp-pdf-processor",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "compromise": "^14.14.5",
+    "pdf-parse": "^1.1.1"
+  }
+}

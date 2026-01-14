@@ -1,0 +1,4 @@
+echo "._*
+.DS_Store
+node_modules/
+.vercel" > .gitignore
