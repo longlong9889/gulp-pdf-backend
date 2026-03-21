@@ -14,6 +14,24 @@ const actionVerbs = ['love', 'like', 'enjoy', 'hate', 'prefer', 'start', 'stop',
 const contextDependentWords = ['cold', 'light', 'sound', 'warm', 'cool', 'dry', 'wet', 'clean', 'dirty', 'dark', 'bright'];
 const commonAdverbs = ['quickly', 'slowly', 'carefully', 'easily', 'happily', 'sadly', 'really', 'very', 'always', 'never', 'often', 'sometimes', 'together', 'apart', 'away', 'here', 'there', 'now', 'then', 'soon', 'already', 'still', 'just', 'also', 'too', 'well', 'fast', 'hard', 'early', 'late', 'daily', 'weekly'];
 
+const numberWords = [
+  'zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+  'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen',
+  'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety',
+  'hundred', 'thousand', 'million',
+  'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'
+];
+
+const timeWords = [
+  'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
+  'september', 'october', 'november', 'december',
+  'today', 'tomorrow', 'yesterday', 'tonight',
+  'morning', 'afternoon', 'evening', 'night',
+  'weekend', 'weekday', 'week', 'month', 'year',
+  'now', 'later', 'soon', 'recently'
+];
+
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
@@ -166,11 +184,11 @@ function extractPartsOfSpeech(sentence) {
   
   // INTERJECTIONS
   const interjectionKeywords = [
-    'oh', 'wow', 'hey', 'hi', 'hello', 'bye', 'goodbye', 
-    'oops', 'ouch', 'uh', 'um', 'ah', 'yay', 'yup', 'yeah', 
+    'oh', 'wow', 'hey', 'hi', 'hello', 'bye', 'goodbye',
+    'oops', 'ouch', 'uh', 'um', 'ah', 'yay', 'yup', 'yeah',
     'nope', 'nah', 'huh', 'hmm', 'ugh', 'whoa', 'yikes'
   ];
-  
+
   const foundInterjections = [];
   words.forEach(word => {
     const cleanWord = word.toLowerCase().replace(/[.,!?]/g, '');
@@ -178,7 +196,58 @@ function extractPartsOfSpeech(sentence) {
       foundInterjections.push(cleanWord);
     }
   });
-  
+
+  // NUMBERS — groups consecutive number words (e.g. "sixty seven" → "sixty seven")
+  const foundNumbers = [];
+  let ni = 0;
+  while (ni < words.length) {
+    const cleanWord = words[ni].toLowerCase().replace(/[.,!?]/g, '');
+    const isNum = numberWords.includes(cleanWord) || /^\d+$/.test(cleanWord);
+    if (isNum) {
+      const phraseWords = [cleanWord];
+      let nj = ni + 1;
+      while (nj < words.length) {
+        const nextWord = words[nj].toLowerCase().replace(/[.,!?]/g, '');
+        if (numberWords.includes(nextWord) || /^\d+$/.test(nextWord)) {
+          phraseWords.push(nextWord);
+          nj++;
+        } else {
+          break;
+        }
+      }
+      const phrase = phraseWords.join(' ');
+      if (!foundNumbers.includes(phrase)) foundNumbers.push(phrase);
+      ni = nj;
+    } else {
+      ni++;
+    }
+  }
+
+  // TIME WORDS
+  const foundTimeWords = [];
+  words.forEach(word => {
+    const cleanWord = word.toLowerCase().replace(/[.,!?]/g, '');
+    if (timeWords.includes(cleanWord) && !foundTimeWords.includes(cleanWord)) {
+      foundTimeWords.push(cleanWord);
+    }
+  });
+
+  // ACTIVITIES (gerund phrases: verb-ing + up to 4 following words)
+  const foundActivities = [];
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i].toLowerCase().replace(/[.,!?]/g, '');
+    if (word.endsWith('ing') && word.length > 4 && !auxiliaryVerbs.includes(word)) {
+      const phraseWords = [word];
+      for (let j = i + 1; j < words.length && j <= i + 4; j++) {
+        const nextWord = words[j].toLowerCase().replace(/[.,!?]/g, '');
+        if (['and', 'or', 'but', 'because', 'so', 'then', 'when', 'while'].includes(nextWord)) break;
+        phraseWords.push(nextWord);
+      }
+      const phrase = phraseWords.join(' ');
+      if (!foundActivities.includes(phrase)) foundActivities.push(phrase);
+    }
+  }
+
   // Final cleanup
   const finalVerbs = foundVerbs.filter(v => !(v.endsWith('ing') && foundNouns.includes(v)));
   const finalNouns = foundNouns.filter(n => !allPronouns.includes(n.toLowerCase()));
@@ -190,7 +259,10 @@ function extractPartsOfSpeech(sentence) {
     adjectives: foundAdjectives.length > 0 ? foundAdjectives.join(', ') : '-',
     adverbs: foundAdverbs.length > 0 ? foundAdverbs.join(', ') : '-',
     pronouns: foundPronouns.length > 0 ? foundPronouns.join(', ') : '-',
-    interjections: foundInterjections.length > 0 ? foundInterjections.join(', ') : '-'
+    interjections: foundInterjections.length > 0 ? foundInterjections.join(', ') : '-',
+    numbers: foundNumbers.length > 0 ? foundNumbers.join(', ') : '-',
+    time: foundTimeWords.length > 0 ? foundTimeWords.join(', ') : '-',
+    activities: foundActivities.length > 0 ? foundActivities.join(' | ') : '-'
   };
 }
 
@@ -484,21 +556,27 @@ export default async function handler(req, res) {
       protest: categorized.filter(r => r.category === 'protest').map(r => r.sentence)
     };
     
-    // Step 4: Collect all unique words by type (for People tile, etc.)
+    // Step 4: Collect all unique words by type
     const allNouns = new Set();
     const allVerbs = new Set();
     const allAdjectives = new Set();
     const allAdverbs = new Set();
-    const allPronouns = new Set();
-    
+    const allPronounsSet = new Set();
+    const allNumbers = new Set();
+    const allTimeWords = new Set();
+    const allActivities = new Set();
+
     categorized.forEach(row => {
       if (row.nouns !== '-') row.nouns.split(', ').forEach(w => allNouns.add(w));
       if (row.verbs !== '-') row.verbs.split(', ').forEach(w => allVerbs.add(w));
       if (row.adjectives !== '-') row.adjectives.split(', ').forEach(w => allAdjectives.add(w));
       if (row.adverbs !== '-') row.adverbs.split(', ').forEach(w => allAdverbs.add(w));
-      if (row.pronouns !== '-') row.pronouns.split(', ').forEach(w => allPronouns.add(w));
+      if (row.pronouns !== '-') row.pronouns.split(', ').forEach(w => allPronounsSet.add(w));
+      if (row.numbers !== '-') row.numbers.split(', ').forEach(w => allNumbers.add(w));
+      if (row.time !== '-') row.time.split(', ').forEach(w => allTimeWords.add(w));
+      if (row.activities !== '-') row.activities.split(' | ').forEach(w => allActivities.add(w.trim()));
     });
-    
+
     return res.status(200).json({
       success: true,
       summary: {
@@ -514,7 +592,10 @@ export default async function handler(req, res) {
         verbs: Array.from(allVerbs),
         adjectives: Array.from(allAdjectives),
         adverbs: Array.from(allAdverbs),
-        pronouns: Array.from(allPronouns)
+        pronouns: Array.from(allPronounsSet),
+        activities: Array.from(allActivities),
+        numbers: Array.from(allNumbers),
+        time: Array.from(allTimeWords)
       },
       analysisTable: categorized
     });
